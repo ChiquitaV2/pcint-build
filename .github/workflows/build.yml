@@ -67,7 +67,8 @@ jobs:
       - name: Build Application
         shell: bash
         run: |
-          task setup
+          task frontend:install
+          task sidecar:install
 
           # On Windows: find the venv Scripts dir and prepend to PATH
           # so that python.exe / nltk etc. are resolvable by Task
