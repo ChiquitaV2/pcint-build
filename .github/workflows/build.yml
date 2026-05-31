@@ -59,7 +59,9 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
 
       - name: Build Application using Taskfile
-        run: task ${{ matrix.task }}
+        run: |
+            task setup
+            task ${{ matrix.task }}
 
       - name: Upload Artifact to Codeberg Release
         shell: bash
