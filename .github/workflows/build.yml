@@ -1,0 +1,96 @@
+name: Codeberg Remote Build (Win/Lin/Mac)
+on:
+  repository_dispatch:
+    types: [codeberg-build]
+
+jobs:
+  build:
+    name: Build ${{ matrix.job_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            task: build:windows
+            job_name: Windows-x64
+            artifact: pcint-translate-tool.exe
+          - os: ubuntu-latest
+            task: build:linux
+            job_name: Linux-x64
+            artifact: pcint-translate-tool
+          - os: macos-latest
+            task: build:darwin
+            job_name: macOS-arm64
+            artifact: pcint-translate-tool
+            # Note: For macOS, this builds the binary. If you want a .app, 
+            # you may need to zip the .app folder before uploading.
+
+    steps:
+      - name: Checkout Code from Codeberg
+        run: |
+          git clone --branch ${{ github.event.client_payload.ref }} ${{ github.event.client_payload.repository }}.git .
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Go Task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Install Linux Build Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Build Application using Taskfile
+        run: task ${{ matrix.task }}
+
+      - name: Upload Artifact to Codeberg Release
+        shell: bash
+        run: |
+          # Use the Forgejo/Codeberg API to upload the binary
+          BINARY_NAME="${{ matrix.artifact }}"
+          FILE_PATH="build/bin/${BINARY_NAME}"
+          
+          # Check if file exists
+          if [ ! -f "$FILE_PATH" ]; then
+            echo "Error: Binary not found at $FILE_PATH"
+            exit 1
+          fi
+
+          # 1. Get the Release ID for the tag from Codeberg
+          # Fallback to a default if release ID isn't found (e.g. for manual branch builds)
+          RELEASE_INFO=$(curl -s -H "Authorization: token ${{ github.event.client_payload.cb_token }}" \
+            "${{ github.event.client_payload.repository }}/api/v1/releases/tags/${{ github.event.client_payload.ref }}")
+          
+          RELEASE_ID=$(echo $RELEASE_INFO | jq -r '.id')
+          
+          if [ "$RELEASE_ID" == "null" ] || [ -z "$RELEASE_ID" ]; then
+            echo "Release not found for tag ${{ github.event.client_payload.ref }}. Skipping upload."
+            exit 0
+          fi
+
+          echo "Uploading $BINARY_NAME to Codeberg Release ID: ${RELEASE_ID}"
+
+          # 2. Upload the binary
+          curl -X POST \
+            -H "Authorization: token ${{ github.event.client_payload.cb_token }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"${FILE_PATH}" \
+            "${{ github.event.client_payload.repository }}/api/v1/releases/${RELEASE_ID}/assets?name=${BINARY_NAME}"
