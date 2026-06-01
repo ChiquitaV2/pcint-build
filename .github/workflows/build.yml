@@ -16,7 +16,7 @@ jobs:
             artifact: pcint-translate-tool.exe
             artifact_path: build/bin/pcint-translate-tool.exe
             is_app_bundle: false
-          - os: ubuntu-22.04          # ← pinned; 24.04 renamed webkit
+          - os: ubuntu-22.04          
             task: build:linux
             job_name: Linux-x64
             artifact: pcint-translate-tool
@@ -51,11 +51,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+
+      - name: Cache Go Tools (Wails & Task)
+        id: cache-go-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-go-tools-${{ hashFiles('go.mod') }}
 
       - name: Install Wails CLI
+        if: steps.cache-go-tools.outputs.cache-hit != 'true'
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Install Go Task
+        if: steps.cache-go-tools.outputs.cache-hit != 'true'
         run: go install github.com/go-task/task/v3/cmd/task@latest
 
       - name: Install Linux Build Dependencies
@@ -103,12 +113,13 @@ jobs:
           echo "Found: ${{ matrix.artifact_path }} ($(du -sh "${{ matrix.artifact_path }}" | cut -f1))"
 
       - name: Upload Artifact to Codeberg Release
+        id: codeberg_release
         shell: bash
         run: |
           ARTIFACT_NAME="${{ matrix.artifact }}"
           FILE_PATH="${{ matrix.artifact_path }}"
           REPO_API="https://codeberg.org/api/v1/repos/bell/pcint-translate-tool"
-          TOKEN="${{ github.event.client_payload.cb_token }}"
+          TOKEN="${{ secrets.CODEBERG_TOKEN }}"
           REF="${{ github.event.client_payload.ref }}"
 
           RELEASE_INFO=$(curl -s \
@@ -117,8 +128,9 @@ jobs:
           echo "Release API response: $RELEASE_INFO"
 
           RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id // empty')
-          if [ -z "$RELEASE_ID" ]; then
-            echo "Release not found for tag '${REF}'. Skipping upload."
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" == "null" ]; then
+            echo "Release not found for tag '${REF}'. Flagging for Actions Artifact fallback."
+            echo "SKIP_UPLOAD=true" >> $GITHUB_ENV
             exit 0
           fi
 
@@ -137,3 +149,11 @@ jobs:
             exit 1
           fi
           echo "Upload successful."
+
+      - name: Upload to GitHub Artifacts (Fallback)
+        if: env.SKIP_UPLOAD == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact_path }}
+          retention-days: 14
