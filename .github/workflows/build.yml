@@ -22,6 +22,14 @@ jobs:
             artifact: pcint-translate-tool
             artifact_path: build/bin/pcint-translate-tool
             is_app_bundle: false
+            is_x86_linux: false
+          - os: ubuntu-22.04          
+            task: build:linux-x86 # Define your specific 32-bit compilation task here
+            job_name: Linux-x86
+            artifact: pcint-translate-tool-x86
+            artifact_path: build/bin/pcint-translate-tool-x86
+            is_app_bundle: false
+            is_x86_linux: true
           - os: macos-latest
             task: build:darwin
             job_name: macOS-arm64
